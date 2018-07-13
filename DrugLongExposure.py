@@ -132,11 +132,12 @@ writer.save()
 #%% Import excel sheet generated on MacPros
 
 %reset_selective -f trajectories2, featMatMean, features
+directoryA = '/Volumes/behavgenom_archive$/Ida/MultiWormTracker/LongExposure1/Results'
 
 from scipy import stats
 
 #import spreadsheet
-featMatMean = pd.read_excel(os.path.join(os.path.dirname(directoryA), 'LongExposureFeatMatMean.xlsx'), na_values = 'nan')
+featMatMean = pd.read_excel(os.path.join(os.path.dirname(directoryA), 'LongExposureFeatMatMean5mins.xlsx'), na_values = 'nan')
 
 allDrugs = list(np.unique(featMatMean['drug']))
 allChunks = list(np.unique(featMatMean['chunk']))
@@ -148,7 +149,7 @@ featZ = pd.concat([featZ, featMatMean[['rep', 'drug', 'chunk']]], axis=1)
 
 #filter out nan features
 featZ.drop(featZ.columns[np.sum(featZ.isna())>(featZ.shape[0]/2)], axis=1, inplace=True)
-featZ = featZ.drop(['timestamp', 'worm_index', 'ttBin'],axis=1)
+featZ = featZ.drop(['timestamp', 'worm_index'],axis=1)
 
 #take median and IQR for all these features to make a plate summary
 featZm = pd.DataFrame()
@@ -191,10 +192,10 @@ featZall = pd.concat([featZall, featZsummary[['rep', 'drug', 'chunk']]], axis = 
 
 #plot as clustermap
     #set lut to chunk number
-cmap = sns.color_palette('tab20', np.unique(featZall['chunk']).shape[0])
-lut = dict(zip(np.unique(featZall['chunk']), cmap))
+cmap = sns.color_palette('tab20', np.unique(featZall['drug']).shape[0])
+lut = dict(zip(np.unique(featZall['drug']), cmap))
 
-rowColors = featZall['chunk'].map(lut)#map onto the feature Matrix
+rowColors = featZall['drug'].map(lut)#map onto the feature Matrix
 
 cg = sns.clustermap(featZall.iloc[:,:-3],  metric  = 'euclidean', cmap = 'inferno', \
            row_colors = rowColors)
@@ -204,10 +205,6 @@ plt.setp(cg.ax_heatmap.yaxis.set_ticklabels\
 #plt.setp(cg.ax_heatmap.xaxis.get_majorticklabels(), rotation = 90, fontsize = 10) 
 col = cg.ax_col_dendrogram.get_position()
 cg.ax_col_dendrogram.set_position([col.x0, col.y0, col.width*1, col.height*1])
-plt.title(allDrugs[drug])
-#save fig
-
-sns.clustermap(featZall.iloc[:,:-3], row_colors =rowColors)
 
 #and make lut map
 #make a figure of the colorbar
@@ -217,10 +214,10 @@ plt.figure()
 ax = plt.imshow([colors])
 ax.axes.set_xticklabels(range(0,11,1))
 ax.axes.set_xticklabels(lut.keys(), rotation = 90)
-ax.axes.set_xticks(np.arange(0,10,1))
+ax.axes.set_xticks(np.arange(0,7,1))
 ax.axes.xaxis.set_ticks_position('top')
+plt.savefig(os.path.join(os.path.dirname(directoryA), 'Figures', 'drugColors.png'))
 
-del featZiqr, featZm
 #%% PCA analysis
 from sklearn.decomposition import PCA
 import PCA_analysis as PC_custom 
@@ -252,8 +249,7 @@ PC_df['chunk'] = featZall['chunk']
 PC_custom.PC12_plots(PC_df, [], 'all' , directoryA, 'tif', 'chunk')
 PCmean, PCsem = PC_custom.PC_av(PC_df, ['PC_1', 'PC_2'], 'chunk')
 test = ['DMSO', 'V3']
-PC_custom.PC_traj(PCmean, PCsem,['PC_1', 'PC_2'], str(test) , directoryA, 'tif', cmap, test)
-
+PC_custom.PC_traj(PCmean, PCsem,['PC_1', 'PC_2'], 'all' , directoryA, 'tif', cmap, [])
 
 
 #which features contribute to the variance?
@@ -292,12 +288,15 @@ plt.savefig(os.path.join(os.path.dirname(directoryA), 'Figures', 'agar_biplot.pn
     
 
 #can also just plot the PCs across the time chunks
-for PC in range(0,4):
-    plt.subplot(1,4,PC+1)
+for PC in range(0,2):
+    plt.subplot(1,2,PC+1)
     ax =sns.pointplot(x="chunk", y=PC_df.columns[PC], data=PC_df, hue = 'drug', legend = True)
     ax.legend_.remove()
-    plt.ylim([-0.5,4])
-plt.legend(loc=2, bbox_to_anchor=(1.05, 1) ,ncol = 1, frameon= True)
+    ax.axes.set_xticklabels(labels = [], rotation = 45)
+    plt.ylim([-1,1])
+plt.legend(loc=4, bbox_to_anchor=(0.4, 1) ,ncol = 3, frameon= True)
+plt.tight_layout(rect=[0,0,1,0.75])
+plt.savefig(os.path.join(os.path.dirname(directoryA), 'Figures', 'PC1PC2plts.png'))
 plt.show()
 
 #%% Calculate euclidean distance between 
@@ -318,87 +317,147 @@ for drug in allDrugs:
     del temp1
 #actually not going to use this
 
-dist1 = pd.DataFrame(distance.squareform(distance.pdist(featZall.iloc[:,:-3])))
+dist1 = pd.DataFrame(distance.squareform(distance.pdist(featZall.iloc[:,:-3], metric= 'euclidean')))
 dist1 = pd.concat([dist1, featZall[['rep', 'drug', 'chunk']]], axis=1)
 
 #compare to DMSO
 DMSOres = dist1.iloc[:,dist1[dist1['drug']=='DMSO'].index]
 #DMSOres.columns = 
-DMSOres = pd.concat([DMSOres, dist1[['drug', 'chunk']]], axis = 1)
+DMSOres = pd.concat([DMSOres, dist1[['rep', 'drug', 'chunk']]], axis = 1)
 
 #need to remodel so that only comparing drugs at the same timepoint
-eye = pd.DataFrame(np.eye(3, dtype = bool))
+#eye = pd.DataFrame(np.eye(3, dtype = bool))
 DMSOmat = pd.DataFrame()
+DMSOmat0 = pd.DataFrame()
 for drug in allDrugs:
     foo = DMSOres['drug'] == drug
     foo2 = DMSOres['drug'] == 'DMSO'
     for chunk in allChunks:
-        bar = DMSOres['chunk'] == chunk        
+        bar = DMSOres['chunk'] == chunk
+        bar2 = DMSOres['chunk']==1
         temp = DMSOres[foo&bar]
+        temp5 = DMSOres[foo &bar2]
         temp = temp.loc[:,DMSOres[foo2&bar].index]
+        temp2 = pd.DataFrame(temp.mean(axis=1))
+        temp3 = temp5.loc[:,DMSOres[foo2&bar2].index]
+        temp4 = pd.DataFrame(temp3.mean(axis=1))
+        #eye.columns = temp.columns
+        #eye.index = temp.index
+        #temp2 = np.array(temp[eye]).flatten()
+        #temp2 = pd.DataFrame(temp2[np.where(~np.isnan(temp2))])
+        #temp2 =temp2.transpose()
+        temp2['drug'] = drug
+        temp2['chunk'] = chunk
+        temp2['rep'] = np.arange(1,temp2.shape[0]+1)
+        
+        temp4['drug'] = drug
+        temp4['chunk'] = chunk
+        temp4['rep'] = np.arange(1,temp4.shape[0]+1)
+        DMSOmat = DMSOmat.append(temp2)
+        DMSOmat0 = DMSOmat0.append(temp4)
+        
+        del temp, temp2, temp3, temp4, bar
+    del foo, foo2
+del bar2
+
+
+#reset index
+DMSOmat = DMSOmat.reset_index(drop=True)
+DMSOmat = DMSOmat.rename(columns = {0:'pdist'})
+
+DMSOmat0 = DMSOmat0.reset_index(drop=True)
+DMSOmat0 = DMSOmat0.rename(columns = {0:'pdist'})
+
+#plot as shaded errorbar
+def errBar (pDistDF, chunkRange):
+    """Function for plotting the drug response using shaded error bar
+    Input:
+        pDistDF - dataframe containing the euclidean distances between drug and control
+        
+    Output:
+        Figure"""
+    
+    ax = sns.tsplot (data = pDistDF, time= 'chunk', value = 'pdist', \
+                condition = 'drug', unit='rep')
+    ax.axes.set_xlim([0,19])
+    ax.axes.set_xticks(np.arange(1,19,2))
+    ax.axes.set_xticklabels(np.arange(15,285,30), rotation = 45)
+    plt.ylabel('Euclidean distance')
+    plt.xlabel('Time (mins)')
+    plt.legend(loc=0, bbox_to_anchor=(1, 1) ,ncol = 1, frameon= True)
+    plt.tight_layout(rect=[0,0,0.75,1])
+    plt.savefig(os.path.join(os.path.dirname(directoryA), 'Figures', 'pDist15mins.png'))
+    plt.close()
+
+#also plot the distance between all conditions at all times compared to DMSO at time = 0
+
+
+#%% multidimensional scaling to embed the responses over time
+
+from sklearn.manifold import MDS
+
+mds = MDS(n_components = 2, dissimilarity='euclidean')
+X3 = mds.fit_transform(X)
+
+#make into dataframe for plotting
+mdsDF = pd.DataFrame(X3, columns = ['mds1', 'mds2'])
+mdsDF = pd.concat([mdsDF, featZall[['rep', 'drug', 'chunk']]], axis = 1)
+
+#plot as 2d kernel density
+plt.figure()
+for drug in range(1,len(allDrugs)+1):
+    plt.subplot(3,3,drug)
+    plt.title(allDrugs[drug-1])
+    temp = mdsDF[mdsDF['drug']==allDrugs[drug-1]]
+    sns.kdeplot(temp.mds1, temp.mds2, cmap = 'Blues')
+    del temp
+plt.show()
+    
+
+
+#%% do the same with the first 2 principal components
+
+dist2 = pd.DataFrame(distance.squareform(distance.pdist(PC_df[['PC_1', 'PC_2']], metric= 'euclidean')))
+dist2 = pd.concat([dist2, featZall[['rep', 'drug', 'chunk']]], axis=1)
+
+#compare to DMSO
+DMSOres2 = dist2.iloc[:,dist2[dist2['drug']=='DMSO'].index]
+#DMSOres.columns = 
+DMSOres2 = pd.concat([DMSOres2, dist2[['rep', 'drug', 'chunk']]], axis = 1)
+
+#need to remodel so that only comparing drugs at the same timepoint
+eye = pd.DataFrame(np.eye(3, dtype = bool))
+DMSOmat2 = pd.DataFrame()
+for drug in allDrugs:
+    foo = DMSOres2['drug'] == drug
+    foo2 = DMSOres2['drug'] == 'DMSO'
+    for chunk in allChunks:
+        bar = DMSOres2['chunk'] == chunk        
+        temp = DMSOres2[foo&bar]
+        temp = temp.loc[:,DMSOres2[foo2&bar].index]
         eye.columns = temp.columns
         eye.index = temp.index
         temp2 = np.array(temp[eye]).flatten()
         temp2 = pd.DataFrame(temp2[np.where(~np.isnan(temp2))])
-        temp2 =temp2.transpose()
+        #temp2 =temp2.transpose()
         temp2['drug'] = drug
         temp2['chunk'] = chunk
-        DMSOmat = DMSOmat.append(temp2)
+        temp2['rep'] = np.arange(1,temp2.shape[0]+1)
+        DMSOmat2 = DMSOmat2.append(temp2)
         del temp, temp2, bar
     del foo, foo2
 
 #reset index
-DMSOmat = DMSOmat.reset_index(drop=True)
-DMSOmat2 = pd.DataFrame(pd.concat([DMSOmat.loc[:,0], DMSOmat.loc[:,1],\
-                      DMSOmat.loc[:,2]], axis=0, ignore_index=True))
+DMSOmat2 = DMSOmat2.reset_index(drop=True)
 DMSOmat2 = DMSOmat2.rename(columns = {0:'pdist'})
-DMSOmat2['drug'] = np.matlib.repmat(DMSOmat['drug'], 3,1).flatten()
-DMSOmat2['chunk'] = np.matlib.repmat(DMSOmat['chunk'], 3,1).flatten()
-DMSOmat2['rep'] = np.matlib.repmat(DMSOmat['rep'], 3,1).flatten()
 
-sns.tsplot (data = DMSOmat2, time= 'chunk', value = 'pdist')#, unit = 'drug')
-plt.show()
-
-#define a function to plot this
-def tsplotDF(ax, data, time, varToplot, name):
-    """ Custom function for shaded error bars
-    ax : axes generated
-    data : pandas dataframe input
-    time : timebins
-    varToplot: variable to plot
-    name: label for the line
-    """
-    #data.name = data
-    x = np.unique(data[time])
-    est = np.empty(shape = x.shape[0])
-    sem =np.empty(shape = x.shape[0])
-    for tbin in range(len(x)):
-        est[int(tbin)] = data[varToplot][data[time]==x[tbin]].mean()
-        sem[int(tbin)] = data[varToplot][data[time]==x[tbin]].std()
-    cis = (est - sem, est + sem)
-    ax.fill_between(x,cis[0],cis[1],alpha=0.2)
-    ax.plot(x,est, label = name)
-    ax.margins(x=0)
-    ax.set_ylabel (varToplot)
-    
-
-fig, ax1 = plt.subplots(1,1)
-for drug in allDrugs:
-    tsplotDF(ax1, DMSOmat2[DMSOmat2['drug']==drug], 'chunk', 'pdist', drug)
-ax1.legend()
-plt.xlim([0,10])
-plt.show()
-plt.savefig(os.path.join(os.path.dirname(directoryA), 'Figures', 'pdist.png'))
-
-
-ax1.set_ylim((-150, 150))
-tsplotDF(ax2, trajectories2[c][exp], 'ttBin', 'angular_velocity', drug)
-ax2.set_ylim((-0.25, 0.25))
-fig.show()
-
-      
-plt.plot(DMSOmat.iloc[:,:-1].transpose())
-plt.legend = DMSOmat['drug']
-    
-    
-
+#plot as shaded errorbar
+ax = sns.tsplot (data = DMSOmat2, time= 'chunk', value = 'pdist', \
+            condition = 'drug', unit='rep')
+ax.axes.set_xlim([0,55])
+ax.axes.set_xticks(np.arange(1,55,2))
+ax.axes.set_xticklabels(np.arange(5,285,10), rotation = 45)
+plt.ylabel('Euclidean distance')
+plt.xlabel('Time (mins)')
+plt.legend(loc=0, bbox_to_anchor=(1, 1) ,ncol = 1, frameon= True)
+plt.tight_layout(rect=[0,0,0.75,1])
