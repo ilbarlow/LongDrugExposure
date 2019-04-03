@@ -132,12 +132,16 @@ writer.save()
 #%% Import excel sheet generated on MacPros
 
 %reset_selective -f trajectories2, featMatMean, features
-directoryA = '/Volumes/behavgenom_archive$/Ida/MultiWormTracker/LongExposure1/Results'
+directoryA = '/Volumes/behavgenom_archive$/Ida/MultiWormTracker/LongExposure/230518LongExposure1/Results'
 
 from scipy import stats
 
 #import spreadsheet
-featMatMean = pd.read_excel(os.path.join(os.path.dirname(directoryA), 'LongExposureFeatMatMean5mins.xlsx'), na_values = 'nan')
+featMatMean1 = pd.read_excel(os.path.join(os.path.dirname(directoryA), 'ExcelSheets', 'LongExposureFeatMatMean5mins.xlsx'), na_values = 'nan')
+featMatMean1= featMatMean.drop(columns = ['worm_index', 'timestamp'])
+featMatMean1['date'] = '230518'
+featMatMean1['exp'] ='n/a'
+
 
 allDrugs = list(np.unique(featMatMean['drug']))
 allChunks = list(np.unique(featMatMean['chunk']))
@@ -336,30 +340,28 @@ for drug in allDrugs:
         bar = DMSOres['chunk'] == chunk
         bar2 = DMSOres['chunk']==1
         temp = DMSOres[foo&bar]
-        temp5 = DMSOres[foo &bar2]
-        temp = temp.loc[:,DMSOres[foo2&bar].index]
-        temp2 = pd.DataFrame(temp.mean(axis=1))
-        temp3 = temp5.loc[:,DMSOres[foo2&bar2].index]
-        temp4 = pd.DataFrame(temp3.mean(axis=1))
+        temp2 = temp.loc[:,DMSOres[foo2&bar].index]
+        temp3 = pd.DataFrame(temp2.mean(axis=1))
+        temp4 = temp.loc[:,DMSOres[foo2&bar2].index]
+        temp5 = pd.DataFrame(temp4.mean(axis=1))
         #eye.columns = temp.columns
         #eye.index = temp.index
         #temp2 = np.array(temp[eye]).flatten()
         #temp2 = pd.DataFrame(temp2[np.where(~np.isnan(temp2))])
         #temp2 =temp2.transpose()
-        temp2['drug'] = drug
-        temp2['chunk'] = chunk
-        temp2['rep'] = np.arange(1,temp2.shape[0]+1)
+        temp3['drug'] = drug
+        temp3['chunk'] = chunk
+        temp3['rep'] = np.arange(1,temp3.shape[0]+1)
         
-        temp4['drug'] = drug
-        temp4['chunk'] = chunk
-        temp4['rep'] = np.arange(1,temp4.shape[0]+1)
-        DMSOmat = DMSOmat.append(temp2)
-        DMSOmat0 = DMSOmat0.append(temp4)
+        temp5['drug'] = drug
+        temp5['chunk'] = chunk
+        temp5['rep'] = np.arange(1,temp3.shape[0]+1)
+        DMSOmat = DMSOmat.append(temp3)
+        DMSOmat0 = DMSOmat0.append(temp5)
         
-        del temp, temp2, temp3, temp4, bar
+        del temp, temp2, temp3, temp4, temp5,  bar
     del foo, foo2
 del bar2
-
 
 #reset index
 DMSOmat = DMSOmat.reset_index(drop=True)
@@ -368,29 +370,30 @@ DMSOmat = DMSOmat.rename(columns = {0:'pdist'})
 DMSOmat0 = DMSOmat0.reset_index(drop=True)
 DMSOmat0 = DMSOmat0.rename(columns = {0:'pdist'})
 
-#plot as shaded errorbar
-def errBar (pDistDF, chunkRange):
+def errBar (pDistDF, chunkSize, figName):
     """Function for plotting the drug response using shaded error bar
     Input:
         pDistDF - dataframe containing the euclidean distances between drug and control
+        chunkRange - a dictionary for the x ticks and tick labels
+        figName - name and file type for saving the figure
         
     Output:
         Figure"""
-    
+    plt.figure()
     ax = sns.tsplot (data = pDistDF, time= 'chunk', value = 'pdist', \
                 condition = 'drug', unit='rep')
-    ax.axes.set_xlim([0,19])
-    ax.axes.set_xticks(np.arange(1,19,2))
-    ax.axes.set_xticklabels(np.arange(15,285,30), rotation = 45)
+    ax.axes.set_xlim([0,np.max(pDistDF['chunk'])+1])
+    ax.axes.set_xticks(np.arange(1,np.max(pDistDF['chunk']+1),2))
+    ax.axes.set_xticklabels(np.arange(5,285,chunkSize*2), rotation = 45)
     plt.ylabel('Euclidean distance')
     plt.xlabel('Time (mins)')
     plt.legend(loc=0, bbox_to_anchor=(1, 1) ,ncol = 1, frameon= True)
     plt.tight_layout(rect=[0,0,0.75,1])
-    plt.savefig(os.path.join(os.path.dirname(directoryA), 'Figures', 'pDist15mins.png'))
-    plt.close()
+    plt.savefig(os.path.join(os.path.dirname(directoryA), 'Figures', figName))
+    plt.show()
 
-#also plot the distance between all conditions at all times compared to DMSO at time = 0
-
+errBar(DMSOmat, 5, 'pDistAbs.png')
+errBar(DMSOmat0, 5, 'pDistNormto0.png')
 
 #%% multidimensional scaling to embed the responses over time
 
