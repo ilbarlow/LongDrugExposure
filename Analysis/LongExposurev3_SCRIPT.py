@@ -10,7 +10,7 @@ Created on Tue Mar 26 15:26:27 2019
 minute windows:
     1. Is there a change in response time over the 4 hour period?
     
-    2. When is the optimum?
+    2. When is the optimum? - find max euc distance?
     
     3. Is it consistent across the two days of experiments?
     
@@ -37,6 +37,9 @@ sys.path.insert(0, '/Users/ibarlow/Documents/GitHub/pythonScripts/Functions')
 
 #import statsFeats as statsFeat
 from PCAexplainedVariance import explainVariance
+import PC_traj as PCJ
+from matplotlib.colors import LinearSegmentedColormap
+import make_colormaps as mkc
 
 def find_window(filename):
     """ Little function to find the window number 
@@ -45,7 +48,7 @@ def find_window(filename):
     Output - the window as int
     """
     try:
-        window = int(re.search(r"\d+", re.search(r"_window_\d+", filename).group()).group())
+        window = int(re.findall(r"(?<=_window_)(\d+|-\d+)", f)[0]) 
         return window+1 #add one as window indexing starts at 0
     except Exception as error:
         print ('{} has error:{}'.format(filename, error))
@@ -63,7 +66,6 @@ if __name__ == '__main__':
     #import features, filenames and metadata
     feat_files = glob.glob(os.path.join(FoldIn, '**/features_summary_tierpsy*'), recursive=True)
     filename_files = glob.glob(os.path.join(FoldIn, '**/filenames_summary_tierpsy*'), recursive=True)
-#    meta_files = glob.glob(os.path.join(FoldIn, '**/*metadata.csv'), recursive=True)
     
     #import the data
     FeatMat={'chunked': pd.DataFrame(), 'unchunked':pd.DataFrame()}
@@ -79,6 +81,9 @@ if __name__ == '__main__':
         else:
             FeatMat['unchunked']= pd.read_csv(f, index_col=False)
             FeatMat['unchunked']['window'] =-1 #set as negative for grouping purposes
+    #get list of feature names here and then use this to keep list of all features that are maintained in future analyses later
+    feat_names = list(FeatMat['chunked'].columns)
+    
     
     #extract metadata from filenames
     metadata = {'chunked':pd.DataFrame(), 'unchunked':pd.DataFrame()}
@@ -129,36 +134,38 @@ if __name__ == '__main__':
     BadFiles = np.unique(np.append(BadFiles, np.where(FeatMatFinal['is_good']==0)[0]))
     FeatMatFinal = FeatMatFinal.reset_index(drop=True).drop(index=BadFiles)
     FeatMatFinal = FeatMatFinal.drop(columns=FeatMatFinal.columns[FeatMatFinal.isna().sum(axis=0)>FeatMatFinal.shape[0]*threshold])
-    FeatMatFinal = FeatMatFinal.drop(columns = FeatMatFinal.select_dtypes(include='float').columns[FeatMatFinal.select_dtypes(include='float').std(axis=0)==0])
+        FeatMatFinal = FeatMatFinal.drop(columns = FeatMatFinal[feat_names].columns[FeatMatFinal[feat_names].std(axis=0)==0])
     FeatMatFinal.drop(columns = 'file_id', inplace=True)
     
-    #extract out list of the feature names
-    feat_names = list(FeatMatFinal.select_dtypes(include='float').columns)
+    #extract out list of the feature names and keep the order
+    feat_names = [i for i in feat_names if i in list(FeatMatFinal.columns)]
     
     #make a dictionary for sorting the data by unique drugs, times, and windows
     metadata_dict = {}
-    metadata_dict['drug'] = np.unique(FeatMatFinal['drug'])
+    metadata_dict['drug'] = FeatMatFinal['drug'].unique()
     metadata_dict['date'] = np.unique(FeatMatFinal['date'])
     metadata_dict['window'] = np.unique(FeatMatFinal['window'])
     
     #normalize
     FeatMatFinal = FeatMatFinal.fillna(FeatMatFinal.mean(axis=0))
-    FeatMatZ = pd.DataFrame(data = stats.zscore(FeatMatFinal.select_dtypes(include='float'), 
+    FeatMatZ = pd.DataFrame(data = stats.zscore(FeatMatFinal[feat_names], 
                             ddof=1, #n-1 degrees of freedom for calculating stdev
                             axis=0),
                             columns = feat_names)
     FeatMatZ[['drug', 'window' , 'date']] = FeatMatFinal[['drug', 'window', 'date']]
+#    FeatMatFinal[feat_names].apply(stats.zscore) this is better
     
     #plot euclidean distance as a function of time
     groupedFeatMatZ = FeatMatZ.groupby(['drug', 'date', 'window']) 
     FeatMatZ_iterator = list(itertools.product(*metadata_dict.values()))
     EucDist= pd.DataFrame()
     for i in FeatMatZ_iterator:
-        control_group = tuple(s if type(s)!=str or s.startswith('18') else control for s in i)
+        control_group = tuple(s if type(s)!=str or s.startswith('18') else control for s in i) #make easier to understand - test if the str is in the list of drugs and only replace if so
+#        or use a replace function
         try:
             EucDist = EucDist.append(
-                    pd.Series({'eDist': euclidean_distances(np.array([groupedFeatMatZ.get_group(i).select_dtypes(include='float').mean(axis=0).values,
-                                groupedFeatMatZ.get_group(control_group).select_dtypes(include= 'float').mean(axis=0).values]))[0,1],
+                    pd.Series({'eDist': euclidean_distances(np.array([groupedFeatMatZ[feat_names].mean(axis=0).values,
+                                groupedFeatMatZ.get_group(control_group)[feat_names].mean(axis=0).values]))[0,1],
                                                 'metadata': i}),
                                                 ignore_index=True)
         except KeyError: 
@@ -172,35 +179,33 @@ if __name__ == '__main__':
     
     #PCA of all the drugs at 5 minute interval snapshots -
     pca = PCA()
-    X = pca.fit_transform(FeatMatZ.select_dtypes(include='float').values)  
+    X = pca.fit_transform(FeatMatZ[feat_names].values)  
     cumvar = np.cumsum(pca.explained_variance_ratio_)
     cut_off = sum(cumvar<0.95)
     plt.plot(np.cumsum(pca.explained_variance_ratio_))
     plt.plot(cut_off*np.ones([2,]), [0,1])
+    plt.xlabel()
     plt.savefig(os.path.join(save_dir, 'cumvar.tif'))
         
     PC_df, PC_sum, PC_feat = explainVariance(pca, X, cut_off, feat_names, save_dir, (0,1)) 
     PC_df = pd.concat([PC_df, FeatMatZ[['drug','date', 'window']]], axis=1)    
-    
-    import PC_traj as PCJ
-    from matplotlib.colors import LinearSegmentedColormap
-    
+
     PC_df_grouped = PC_df.groupby(['drug', 'date', 'window'])
     PC_av = pd.DataFrame()
     PC_std = pd.DataFrame()
     for i in FeatMatZ_iterator:
         try:
-            PC_av = PC_av.append(PC_df_grouped.get_group(i).mean().append(
+            PC_av = PC_av.append(PC_df_grouped.get_group(i)[feat_names].mean().append(
                                     pd.Series({'drug':i[0],
-#                                               'date':i[1],
-#                                               'window':i[2]
+                                               'date':i[1],
+                                               'window':i[2]
                                                 })).to_frame().transpose(),
                                     ignore_index=True)
     
-            PC_std = PC_std.append(PC_df_grouped.get_group(i).std().append(
+            PC_std = PC_std.append(PC_df_grouped.get_group(i)[feat_names].std().append(
                                     pd.Series({'drug':i[0],
-#                                               'date':i[1],
-#                                               'window':i[2]
+                                               'date':i[1],
+                                               'window':i[2]
                                                 })).to_frame().transpose(), 
                                    ignore_index=True)
         except Exception as error:
@@ -214,6 +219,7 @@ if __name__ == '__main__':
         cmapGraded.append([(1,1,1), (item)])
     
     lutGraded = dict(zip(metadata_dict['drug'], cmapGraded))
+    #TODO refactor this
     cm={}
     for drug in lutGraded:
         cmap_name = drug
@@ -221,14 +227,20 @@ if __name__ == '__main__':
         cm[drug] = LinearSegmentedColormap.from_list(
             cmap_name, lutGraded[drug], N=60)
         plt.register_cmap(cmap = cm[drug])   
+    mkc.plot_color_gradients(cm, cm.keys())
+    plt.savefig(os.path.join(save_dir, 'colormap.tif'), dpi=300)
+    plt.close()
     
-    PCJ.PC_trajGraded(PC_av,
-                      PC_std,
-                      ['PC_1', 'PC_2'],
-                      metadata_dict['date'][0],
-                      save_dir,
-                      '.png',
-                      scaling = 'window',
-                      start_end = False,
-                      cum_var = cumvar,
-                      legend = 'off')
+    for date in metadata_dict['date']:
+        PCJ.PC_trajGraded(PC_av[PC_av['date']==date],
+                          PC_std[PC_std['date']==date],
+                          ['PC_1', 'PC_2'],
+                          date,
+                          save_dir,
+                          '.png',
+                          scaling = 'window',
+                          start_end = False,
+                          cum_var = cumvar,
+                          legend = 'off')
+    
+#    combined data
